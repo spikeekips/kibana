@@ -172,3 +172,7 @@
   opacity: 0.2;
 }
 
+.row-fluid [class*="span"] {
+    margin-left: 0;
+}
+
