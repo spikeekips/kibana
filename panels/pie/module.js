@@ -201,7 +201,7 @@ angular.module('kibana.pie', [])
             radius: 2/3,
             formatter: function(label, series){
               return '<div "style="font-size:8pt;text-align:center;padding:2px;color:white;">'+
-                series.info.alias+'<br/>'+Math.round(series.percent)+'%</div>';
+                label+'<br/>'+Math.round(series.percent)+'%</div>';
             },
             threshold: 0.1 
           }
