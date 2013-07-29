@@ -4,16 +4,9 @@
 
   ## Pie
 
-  This panel is probably going away. For now its has 2 modes: 
-    * terms: Run a terms facet on the query. You're gonna have a bad (ES crashing) day
-    if you run in this mode on a high cardinality field
-    * goal: Compare the query to this number and display the percentage that the query
-    represents
-
   ### Parameters
-  * query :: An object with 3 possible parameters depends on the mode:
+  * query :: An object with 2 possible parameters depends on the mode:
   ** field: Fields to run a terms facet on. Only does anything in terms mode
-  ** query: A string of the query to run
   ** goal: How many to shoot for, only does anything in goal mode
   * exclude :: In terms mode, ignore these terms
   * donut :: Drill a big hole in the pie
@@ -29,12 +22,22 @@
 'use strict';
 
 angular.module('kibana.pie', [])
-.controller('pie', function($scope, $rootScope, query, dashboard, filterSrv) {
+.controller('pie', function($scope, $rootScope, querySrv, dashboard, filterSrv) {
+
+  $scope.panelMeta = {
+    status  : "Deprecated",
+    description : "Uses an Elasticsearch terms facet to create a pie chart. You should really only"+
+      " point this at not_analyzed fields for that reason. This panel is going away soon, it has"+
+      " <strong>been replaced by the terms panel</strong>. Please use that one instead."
+  };
 
   // Set and populate defaults
   var _d = {
-    status  : "Deprecating Soon",
     query   : { field:"_type", goal: 100}, 
+    queries     : {
+      mode        : 'all',
+      ids         : []
+    },
     size    : 10,
     exclude : [],
     donut   : false,
@@ -42,7 +45,6 @@ angular.module('kibana.pie', [])
     legend  : "above",
     labels  : true,
     mode    : "terms",
-    group   : "default",
     default_field : 'DEFAULT',
     spyable : true,
   };
@@ -84,14 +86,17 @@ angular.module('kibana.pie', [])
       return;
     } 
 
-    $scope.panel.loading = true;
+
+    $scope.panelMeta.loading = true;
     var request = $scope.ejs.Request().indices(dashboard.indices);
 
+    $scope.panel.queries.ids = querySrv.idsByMode($scope.panel.queries);
     // This could probably be changed to a BoolFilter 
     var boolQuery = $scope.ejs.BoolQuery();
-    _.each(query.list,function(q) {
-      boolQuery = boolQuery.should($scope.ejs.QueryStringQuery(q.query || '*'));
+    _.each($scope.panel.queries.ids,function(id) {
+      boolQuery = boolQuery.should(querySrv.getEjsObj(id));
     });
+
 
     var results;
 
@@ -114,7 +119,7 @@ angular.module('kibana.pie', [])
 
       // Populate scope when we have results
       results.then(function(results) {
-        $scope.panel.loading = false;
+        $scope.panelMeta.loading = false;
         $scope.hits = results.hits.total;
         $scope.data = [];
         var k = 0;
@@ -138,7 +143,7 @@ angular.module('kibana.pie', [])
       results = request.doSearch();
 
       results.then(function(results) {
-        $scope.panel.loading = false;
+        $scope.panelMeta.loading = false;
         var complete  = results.hits.total;
         var remaining = $scope.panel.query.goal - complete;
         $scope.data = [
@@ -162,7 +167,7 @@ angular.module('kibana.pie', [])
   };
 
 })
-.directive('pie', function(query, filterSrv, dashboard) {
+.directive('pie', function(querySrv, filterSrv, dashboard) {
   return {
     restrict: 'A',
     link: function(scope, elem, attrs) {
@@ -239,15 +244,19 @@ angular.module('kibana.pie', [])
             clickable: true 
           },
           legend: { show: false },
-          colors: query.colors
+          colors: querySrv.colors
         };
 
-        // Populate element
+        // Populate legend
         if(elem.is(":visible")){
           scripts.wait(function(){
-            scope.plot = $.plot(elem, scope.data, pie);
+            scope.legend = $.plot(elem, scope.data, pie).getData();
+            if(!scope.$$phase) {
+              scope.$apply();
+            }
           });
         }
+
       }
 
       function tt(x, y, contents) {
@@ -280,7 +289,8 @@ angular.module('kibana.pie', [])
       elem.bind("plothover", function (event, pos, item) {
         if (item) {
           var percent = parseFloat(item.series.percent).toFixed(1) + "%";
-          tt(pos.pageX, pos.pageY, "<div style='vertical-align:middle;display:inline-block;background:"+item.series.color+";height:15px;width:15px;border-radius:10px;'></div> " + 
+          tt(pos.pageX, pos.pageY, "<div "+"style='vertical-align:middle;display:inline-block;"+
+            "background:"+item.series.color+";height:15px;width:15px;border-radius:10px;'></div> "+
             (item.series.label||"")+ " " + percent);
         } else {
           $("#pie-tooltip").remove();

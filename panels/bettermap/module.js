@@ -5,12 +5,7 @@
 
   ## Better maps
 
-  So the cavaet for this panel is that, for better or worse, it does NOT use the terms facet and it
-  DOES query sequentially. This however means that
-
   ### Parameters
-  * query ::  A single query string, not and array. This panel can only handle one
-              query at a time. 
   * size :: How many results to show, more results = slower
   * field :: field containing a 2 element array in the format [lon,lat]
   * tooltip :: field to extract the tool tip value from
@@ -20,17 +15,27 @@
 'use strict';
 
 angular.module('kibana.bettermap', [])
-.controller('bettermap', function($scope, query, dashboard, filterSrv) {
+.controller('bettermap', function($scope, querySrv, dashboard, filterSrv) {
+
+  $scope.panelMeta = {
+    status  : "Experimental",
+    description : "Displays geo points in clustered groups on a map. The cavaet for this panel is"+
+      " that, for better or worse, it does NOT use the terms facet and it <b>does</b> query "+
+      "sequentially. This however means that it transfers more data and is generally heavier to"+
+      " compute, while showing less actual data. If you have a time filter, it will attempt to"+
+      " show to most recent points in your search, up to your defined limit"
+  };
 
   // Set and populate defaults
   var _d = {
-    status  : "Experimental",
-    query   : "*",
+    queries     : {
+      mode        : 'all',
+      ids         : []
+    },
     size    : 1000,
     spyable : true,
     tooltip : "_id",
-    field   : null,
-    group   : "default"
+    field   : null
   };
   _.defaults($scope.panel,_d);
 
@@ -66,9 +71,11 @@ angular.module('kibana.bettermap', [])
 
     var _segment = _.isUndefined(segment) ? 0 : segment;
 
+    $scope.panel.queries.ids = querySrv.idsByMode($scope.panel.queries);
+    // This could probably be changed to a BoolFilter 
     var boolQuery = $scope.ejs.BoolQuery();
-    _.each(query.list,function(q) {
-      boolQuery = boolQuery.should($scope.ejs.QueryStringQuery((q.query || '*')));
+    _.each($scope.panel.queries.ids,function(id) {
+      boolQuery = boolQuery.should(querySrv.getEjsObj(id));
     });
 
     var request = $scope.ejs.Request().indices(dashboard.indices[_segment])
@@ -89,7 +96,7 @@ angular.module('kibana.bettermap', [])
 
     // Populate scope when we have results
     results.then(function(results) {
-      $scope.panel.loading = false;
+      $scope.panelMeta.loading = false;
 
       if(_segment === 0) {
         $scope.hits = 0;
@@ -167,7 +174,7 @@ angular.module('kibana.bettermap', [])
       var map, markers, layerGroup, mcg;
 
       function render_panel() { 
-        scope.panel.loading = false;
+        scope.panelMeta.loading = false;
 
         var scripts = $LAB.script("panels/bettermap/lib/leaflet.js").wait()
           .script("panels/bettermap/lib/plugins.js");

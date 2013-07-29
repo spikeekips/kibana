@@ -4,8 +4,6 @@
 
   ## Derivequeries
 
-  Broadcasts an array of queries based on the results of a terms facet
-
   ### Parameters
   * label :: The label to stick over the field 
   * query :: A string to use as a filter for the terms facet
@@ -19,16 +17,23 @@
 'use strict';
 
 angular.module('kibana.derivequeries', [])
-.controller('derivequeries', function($scope, $rootScope, query, fields, dashboard, filterSrv) {
+.controller('derivequeries', function($scope, $rootScope, querySrv, fields, dashboard, filterSrv) {
+
+  $scope.panelMeta = {
+    status  : "Experimental",
+    description : "Creates a new set of queries using the Elasticsearch terms facet. For example,"+
+     " you might want to create 5 queries showing the most frequent HTTP response codes. Be "+
+     "careful not to select a high cardinality field, as Elasticsearch must load all unique values"+
+     " into memory."
+  };
+
 
   // Set and populate defaults
   var _d = {
     loading : false,
-    status  : "Beta",
     label   : "Search",
     query   : "*",
     ids     : [],
-    group   : "default",
     field   : '_type',
     fields  : [],
     spyable : true,
@@ -52,7 +57,7 @@ angular.module('kibana.derivequeries', [])
       return;
     }
 
-    $scope.panel.loading = true;
+    $scope.panelMeta.loading = true;
     var request = $scope.ejs.Request().indices(dashboard.indices);
 
     // Terms mode
@@ -73,7 +78,7 @@ angular.module('kibana.derivequeries', [])
 
     // Populate scope when we have results
     results.then(function(results) {
-      $scope.panel.loading = false;
+      $scope.panelMeta.loading = false;
       var suffix,
           data = [];
       if ($scope.panel.query === '' || $scope.panel.mode === 'terms only') {
@@ -87,15 +92,15 @@ angular.module('kibana.derivequeries', [])
       _.each(results.facets.query.terms, function(v) {
         var _q = $scope.panel.field+':"'+v.term+'"'+suffix;
         // if it isn't in the list, remove it
-        var _iq = query.findQuery(_q);
+        var _iq = querySrv.findQuery(_q);
         if(!_iq) {
-          ids.push(query.set({query:_q}));
+          ids.push(querySrv.set({query:_q}));
         } else {
           ids.push(_iq.id);
         }
       });
       _.each(_.difference($scope.panel.ids,ids),function(id){
-        query.remove(id);
+        querySrv.remove(id);
       });
       $scope.panel.ids = ids;
       dashboard.refresh();

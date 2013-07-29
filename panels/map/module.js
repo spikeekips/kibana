@@ -5,15 +5,7 @@
 
   ## Map
 
-  LOL. Should this even be documented? Zach's map panel is going to ruin this one. 
-  For serious. This shades a map of the world, the US or Europe with the number of 
-  events that match the query. Uses 2 letter country codes and nothing else. This uses
-  a terms facet. Its probably safe as long as you point it at the right field. Nach.
-  There's no way to query sequentially here, so I'm going to hit them all at once!
-
   ### Parameters
-  * query ::  A single query string, not and array. This panel can only handle one
-              query at a time. 
   * map :: 'world', 'us' or 'europe'
   * colors :: an array of colors to use for the regions of the map. If this is a 2 
               element array, jquerymap will generate shades between these colors 
@@ -28,18 +20,26 @@
 'use strict';
 
 angular.module('kibana.map', [])
-.controller('map', function($scope, $rootScope, query, dashboard, filterSrv) {
+.controller('map', function($scope, $rootScope, querySrv, dashboard, filterSrv) {
+
+  $scope.panelMeta = {
+    status  : "Stable",
+    description : "Displays a map of shaded regions using a field containing a 2 letter country "+
+     ", or US state, code. Regions with more hit are shaded darker. Node that this does use the"+
+     " Elasticsearch terms facet, so it is important that you set it to the correct field."
+  };
 
   // Set and populate defaults
   var _d = {
-    status  : "Beta",
-    query   : "*",
+    queries     : {
+      mode        : 'all',
+      ids         : []
+    },
     map     : "world",
     colors  : ['#A0E2E2', '#265656'],
     size    : 100,
     exclude : [],
     spyable : true,
-    group   : "default",
     index_limit : 0
   };
   _.defaults($scope.panel,_d);
@@ -55,15 +55,17 @@ angular.module('kibana.map', [])
     if(dashboard.indices.length === 0) {
       return;
     }
-    $scope.panel.loading = true;
+    $scope.panelMeta.loading = true;
 
 
     var request;
     request = $scope.ejs.Request().indices(dashboard.indices);
 
+    $scope.panel.queries.ids = querySrv.idsByMode($scope.panel.queries);
+    // This could probably be changed to a BoolFilter 
     var boolQuery = $scope.ejs.BoolQuery();
-    _.each(query.list,function(q) {
-      boolQuery = boolQuery.should($scope.ejs.QueryStringQuery(q.query || '*'));
+    _.each($scope.panel.queries.ids,function(id) {
+      boolQuery = boolQuery.should(querySrv.getEjsObj(id));
     });
 
     // Then the insert into facet and make the request
@@ -84,7 +86,7 @@ angular.module('kibana.map', [])
 
     // Populate scope when we have results
     results.then(function(results) {
-      $scope.panel.loading = false;
+      $scope.panelMeta.loading = false;
       $scope.hits = results.hits.total;
       $scope.data = {};
       _.each(results.facets.map.terms, function(v) {

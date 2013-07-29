@@ -3,10 +3,11 @@
 
 /*
 
-  ## Hits
+  ## Terms
 
   ### Parameters
   * style :: A hash of css styles
+  * size :: top N
   * arrangement :: How should I arrange the query results? 'horizontal' or 'vertical'
   * chart :: Show a chart? 'none', 'bar', 'pie'
   * donut :: Only applies to 'pie' charts. Punches a hole in the chart for some reason
@@ -17,13 +18,13 @@
 
 'use strict';
 
-angular.module('kibana.hits', [])
-.controller('hits', function($scope, querySrv, dashboard, filterSrv) {
+angular.module('kibana.terms', [])
+.controller('terms', function($scope, querySrv, dashboard, filterSrv) {
 
   $scope.panelMeta = {
-    status  : "Stable",
-    description : "The total hits for a query or set of queries. Can be a pie chart, bar chart, "+
-      "list, or absolute total of all queries combined"
+    status  : "Beta",
+    description : "Displays the results of an elasticsearch facet as a pie chart, bar chart, or a "+ 
+      "table"
   };
 
   // Set and populate defaults
@@ -32,13 +33,19 @@ angular.module('kibana.hits', [])
       mode        : 'all',
       ids         : []
     },
+    field   : '_type',
+    exclude : [],
+    missing : true,
+    other   : true,
+    size    : 10,
+    order   : 'count',
     style   : { "font-size": '10pt'},
-    arrangement : 'horizontal',
-    chart       : 'bar',
-    counter_pos : 'above',
     donut   : false,
     tilt    : false,
-    labels  : true
+    labels  : true,
+    arrangement : 'horizontal',
+    chart       : 'bar',
+    counter_pos : 'above'
   };
   _.defaults($scope.panel,_d);
 
@@ -53,82 +60,74 @@ angular.module('kibana.hits', [])
   };
 
   $scope.get_data = function(segment,query_id) {
-    delete $scope.panel.error;
-    $scope.panelMeta.loading = true;
-
     // Make sure we have everything for the request to complete
     if(dashboard.indices.length === 0) {
       return;
-    }
+    } 
 
-    var _segment = _.isUndefined(segment) ? 0 : segment;
-    var request = $scope.ejs.Request().indices(dashboard.indices[_segment]);
-    
+    $scope.panelMeta.loading = true;
+    var request,
+      results,
+      boolQuery;
+
+    request = $scope.ejs.Request().indices(dashboard.indices);
+
     $scope.panel.queries.ids = querySrv.idsByMode($scope.panel.queries);
-    // Build the question part of the query
-    _.each($scope.panel.queries.ids, function(id) {
-      var _q = $scope.ejs.FilteredQuery(
-        querySrv.getEjsObj(id),
-        filterSrv.getBoolFilter(filterSrv.ids));
-    
-      request = request
-        .facet($scope.ejs.QueryFacet(id)
-          .query(_q)
-        ).size(0);
+    // This could probably be changed to a BoolFilter 
+    boolQuery = $scope.ejs.BoolQuery();
+    _.each($scope.panel.queries.ids,function(id) {
+      boolQuery = boolQuery.should(querySrv.getEjsObj(id));
     });
 
-    // TODO: Spy for hits panel
+    // Terms mode
+    request = request
+      .facet($scope.ejs.TermsFacet('terms')
+        .field($scope.panel.field)
+        .size($scope.panel.size)
+        .order($scope.panel.order)
+        .exclude($scope.panel.exclude)
+        .facetFilter($scope.ejs.QueryFilter(
+          $scope.ejs.FilteredQuery(
+            boolQuery,
+            filterSrv.getBoolFilter(filterSrv.ids)
+            )))).size(0);
+
     //$scope.populate_modal(request);
 
-    // Then run it
-    var results = request.doSearch();
+    results = request.doSearch();
 
     // Populate scope when we have results
     results.then(function(results) {
+      var k = 0;
       $scope.panelMeta.loading = false;
-      if(_segment === 0) {
-        $scope.hits = 0;
-        $scope.data = [];
-        query_id = $scope.query_id = new Date().getTime();
-      }
+      $scope.hits = results.hits.total;
+      $scope.data = [];
+      _.each(results.facets.terms.terms, function(v) {
+        var slice = { label : v.term, data : [[k,v.count]], actions: true}; 
+        $scope.data.push(slice);
+        k = k + 1;
+      });
       
-      // Check for error and abort if found
-      if(!(_.isUndefined(results.error))) {
-        $scope.panel.error = $scope.parse_error(results.error);
-        return;
-      }
+      $scope.data.push({label:'Missing field',
+        data:[[k,results.facets.terms.missing]],meta:"missing",color:'#aaa',opacity:0});
+      $scope.data.push({label:'Other values',
+        data:[[k+1,results.facets.terms.other]],meta:"other",color:'#444'});
 
-      // Convert facet ids to numbers
-      var facetIds = _.map(_.keys(results.facets),function(k){return parseInt(k, 10);});
-
-      // Make sure we're still on the same query/queries
-      if($scope.query_id === query_id && 
-        _.intersection(facetIds,$scope.panel.queries.ids).length === $scope.panel.queries.ids.length
-        ) {
-        var i = 0;
-        _.each($scope.panel.queries.ids, function(id) {
-          var v = results.facets[id];
-          var hits = _.isUndefined($scope.data[i]) || _segment === 0 ? 
-            v.count : $scope.data[i].hits+v.count;
-          $scope.hits += v.count;
-
-          // Create series
-          $scope.data[i] = { 
-            info: querySrv.list[id],
-            id: id,
-            hits: hits,
-            data: [[i,hits]]
-          };
-
-          i++;
-        });
-        $scope.$emit('render');
-        if(_segment < dashboard.indices.length-1) {
-          $scope.get_data(_segment+1,query_id);
-        }
-        
-      }
+      $scope.$emit('render');
     });
+  };
+
+  $scope.build_search = function(term,negate) {
+    if(_.isUndefined(term.meta)) {
+      filterSrv.set({type:'terms',field:$scope.panel.field,value:term.label,
+        mandate:(negate ? 'mustNot':'must')});
+    } else if(term.meta === 'missing') {
+      filterSrv.set({type:'exists',field:$scope.panel.field,
+        mandate:(negate ? 'must':'mustNot')});
+    } else {
+      return;
+    }
+    dashboard.refresh();
   };
 
   $scope.set_refresh = function (state) { 
@@ -143,12 +142,20 @@ angular.module('kibana.hits', [])
     $scope.$emit('render');
   };
 
-  function set_time(time) {
-    $scope.time = time;
-    $scope.get_data();
-  }
+  $scope.showMeta = function(term) {
+    if(_.isUndefined(term.meta)) {
+      return true;
+    }
+    if(term.meta === 'other' && !$scope.panel.other) {
+      return false;
+    }
+    if(term.meta === 'missing' && !$scope.panel.missing) {
+      return false;
+    }
+    return true;
+  };
 
-}).directive('hitsChart', function(querySrv) {
+}).directive('termsChart', function(querySrv, filterSrv, dashboard) {
   return {
     restrict: 'A',
     link: function(scope, elem, attrs, ctrl) {
@@ -165,18 +172,19 @@ angular.module('kibana.hits', [])
 
       // Function for rendering panel
       function render_panel() {
+        var plot, chartData;
+        var scripts = $LAB.script("common/lib/panels/jquery.flot.js").wait()
+                          .script("common/lib/panels/jquery.flot.pie.js");
+
         // IE doesn't work without this
         elem.css({height:scope.panel.height||scope.row.height});
 
-        try {
-          _.each(scope.data,function(series) {
-            series.label = series.info.alias;
-            series.color = series.info.color;
-          });
-        } catch(e) {return;}
-
-        var scripts = $LAB.script("common/lib/panels/jquery.flot.js").wait()
-                          .script("common/lib/panels/jquery.flot.pie.js");
+        // Make a clone we can operate on.
+        chartData = _.clone(scope.data);
+        chartData = scope.panel.missing ? chartData : 
+          _.without(chartData,_.findWhere(chartData,{meta:'missing'}));
+        chartData = scope.panel.other ? chartData : 
+        _.without(chartData,_.findWhere(chartData,{meta:'other'}));
 
         // Populate element.
         scripts.wait(function(){
@@ -184,7 +192,7 @@ angular.module('kibana.hits', [])
           try {
             // Add plot to scope so we can build out own legend 
             if(scope.panel.chart === 'bar') {
-              scope.plot = $.plot(elem, scope.data, {
+              plot = $.plot(elem, chartData, {
                 legend: { show: false },
                 series: {
                   lines:  { show: false, },
@@ -198,12 +206,19 @@ angular.module('kibana.hits', [])
                   borderColor: '#eee',
                   color: "#eee",
                   hoverable: true,
+                  clickable: true
                 },
                 colors: querySrv.colors
               });
             }
             if(scope.panel.chart === 'pie') {
-              scope.plot = $.plot(elem, scope.data, {
+              var labelFormat = function(label, series){
+                return '<div ng-click="build_search(panel.field,\''+label+'\')'+
+                  ' "style="font-size:8pt;text-align:center;padding:2px;color:white;">'+
+                  label+'<br/>'+Math.round(series.percent)+'%</div>';
+              };
+
+              plot = $.plot(elem, chartData, {
                 legend: { show: false },
                 series: {
                   pie: {
@@ -221,11 +236,7 @@ angular.module('kibana.hits', [])
                     label: { 
                       show: scope.panel.labels,
                       radius: 2/3,
-                      formatter: function(label, series){
-                        return '<div ng-click="build_search(panel.query.field,\''+label+'\')'+
-                          ' "style="font-size:8pt;text-align:center;padding:2px;color:white;">'+
-                          label+'<br/>'+Math.round(series.percent)+'%</div>';
-                      },
+                      formatter: labelFormat,
                       threshold: 0.1 
                     }
                   }
@@ -233,6 +244,16 @@ angular.module('kibana.hits', [])
                 //grid: { hoverable: true, clickable: true },
                 grid:   { hoverable: true, clickable: true },
                 colors: querySrv.colors
+              });
+            }
+
+            // Populate legend
+            if(elem.is(":visible")){
+              scripts.wait(function(){
+                scope.legend = plot.getData();
+                if(!scope.$$phase) {
+                  scope.$apply();
+                }
               });
             }
 
@@ -259,13 +280,20 @@ angular.module('kibana.hits', [])
         }).appendTo("body");
       }
 
+      elem.bind("plotclick", function (event, pos, object) {
+        if(object) {
+          scope.build_search(scope.data[object.seriesIndex]);
+        }
+      });
+
       elem.bind("plothover", function (event, pos, item) {
         if (item) {
           var value = scope.panel.chart === 'bar' ? 
             item.datapoint[1] : item.datapoint[1][0][1];
           tt(pos.pageX, pos.pageY,
             "<div style='vertical-align:middle;border-radius:10px;display:inline-block;background:"+
-            item.series.color+";height:20px;width:20px'></div> "+value.toFixed(0));
+            item.series.color+";height:20px;width:20px'></div> "+item.series.label+
+            " ("+value.toFixed(0)+")");
         } else {
           $("#pie-tooltip").remove();
         }

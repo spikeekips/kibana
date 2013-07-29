@@ -4,10 +4,6 @@
 
   ## Timepicker
 
-  The timepicker panel is used to select time ranges and inform other panel of 
-  them. It also handles searching for indices that match the given time range and 
-  a pattern
-
   ### Parameters
   * mode :: The default mode of the panel. Options: 'relative', 'absolute' 'since' Default: 'relative'
   * time_options :: An array of possible time options. Default: ['5m','15m','1h','6h','12h','24h','2d','7d','30d']
@@ -24,6 +20,13 @@
 angular.module('kibana.timepicker', [])
 .controller('timepicker', function($scope, $rootScope, $timeout, timer, $http, dashboard, filterSrv) {
 
+  $scope.panelMeta = {
+    status  : "Stable",
+    description : "A panel for controlling the time range filters. If you have time based data, "+
+      " or if you're using time stamped indices, you need one of these"
+  };
+
+
   // Set and populate defaults
   var _d = {
     status        : "Stable",
@@ -32,7 +35,6 @@ angular.module('kibana.timepicker', [])
     timespan      : '15m',
     timefield     : '@timestamp',
     timeformat    : "",
-    group         : "default",
     refresh       : {
       enable  : false, 
       interval: 30,
@@ -75,7 +77,13 @@ angular.module('kibana.timepicker', [])
     // These 3 statements basicly do everything time_apply() does
     set_timepicker($scope.time.from,$scope.time.to);
     update_panel();
-    set_time_filter($scope.time);
+
+    // If we're in a mode where something must be calculated, clear existing filters
+    // and set new ones
+    if($scope.panel.mode !== 'absolute') {
+      set_time_filter($scope.time);
+    }
+
     dashboard.refresh();
 
 
@@ -92,7 +100,6 @@ angular.module('kibana.timepicker', [])
         if($scope.time.from.diff(moment.utc(time.from),'seconds') !== 0 ||
           $scope.time.to.diff(moment.utc(time.to),'seconds') !== 0)
         {
-
           $scope.set_mode('absolute');
 
           // These 3 statements basicly do everything time_apply() does
@@ -176,12 +183,12 @@ angular.module('kibana.timepicker', [])
   // 
   $scope.time_calc = function(){
     var from,to;
-    // If time picker is defined (usually is)
+    // If time picker is defined (usually is) TOFIX: Horrible parsing
     if(!(_.isUndefined($scope.timepicker))) {
       from = $scope.panel.mode === 'relative' ? moment(kbn.time_ago($scope.panel.timespan)) :
-        moment($scope.timepicker.from.date + " " + $scope.timepicker.from.time,'MM/DD/YYYY HH:mm:ss');
+        moment(moment.utc($scope.timepicker.from.date).format('MM/DD/YYYY') + " " + $scope.timepicker.from.time,'MM/DD/YYYY HH:mm:ss');
       to = $scope.panel.mode !== 'absolute' ? moment() :
-        moment($scope.timepicker.to.date + " " + $scope.timepicker.to.time,'MM/DD/YYYY HH:mm:ss');
+        moment(moment.utc($scope.timepicker.to.date).format('MM/DD/YYYY') + " " + $scope.timepicker.to.time,'MM/DD/YYYY HH:mm:ss');
     // Otherwise (probably initialization)
     } else {
       from = $scope.panel.mode === 'relative' ? moment(kbn.time_ago($scope.panel.timespan)) :
@@ -211,11 +218,13 @@ angular.module('kibana.timepicker', [])
     // Remove all other time filters
     filterSrv.removeByType('time');
 
+    
     $scope.time = $scope.time_calc();
     $scope.time.field = $scope.panel.timefield;
+    
     update_panel();
-
     set_time_filter($scope.time);
+
     dashboard.refresh();
 
   };
@@ -223,15 +232,9 @@ angular.module('kibana.timepicker', [])
 
   function set_time_filter(time) {
     time.type = 'time';
-    // Check if there's a time filter we remember, if not, set one and remember it
-    if(!_.isUndefined($scope.panel.filter_id) && 
-      !_.isUndefined(filterSrv.list[$scope.panel.filter_id]) && 
-      filterSrv.list[$scope.panel.filter_id].type === 'time') 
-    {
-      filterSrv.set(compile_time(time),$scope.panel.filter_id);
-    } else {
-      $scope.panel.filter_id = filterSrv.set(compile_time(time));
-    }
+    // Clear all time filters, set a new one
+    filterSrv.removeByType('time');
+    $scope.panel.filter_id = filterSrv.set(compile_time(time));
     return $scope.panel.filter_id;
   }
 

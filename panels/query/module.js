@@ -4,8 +4,6 @@
 
   ## query
 
-  An experimental panel for the query service
-
   ### Parameters
   * label ::  The label to stick over the field 
   * query ::  A string or an array of querys. String if multi is off, array if it is on
@@ -16,31 +14,40 @@
 'use strict';
 
 angular.module('kibana.query', [])
-.controller('query', function($scope, query, $rootScope) {
+.controller('query', function($scope, querySrv, $rootScope) {
+
+  $scope.panelMeta = {
+    status  : "Stable",
+    description : "Manage all of the queries on the dashboard. You almost certainly need one of "+
+      "these somewhere. This panel allows you to add, remove, label, pin and color queries"
+  };
 
   // Set and populate defaults
   var _d = {
-    status  : "Experimental",
     label   : "Search",
     query   : "*",
-    group   : "default",
+    pinned  : true,
     history : [],
     remember: 10 // max: 100, angular strap can't take a variable for items param
   };
   _.defaults($scope.panel,_d);
 
-  $scope.queries = query;
+  $scope.querySrv = querySrv;
 
   $scope.init = function() {
   };
 
   $scope.refresh = function(query) {
-    update_history(_.pluck($scope.queries.list,'query'));
+    update_history(_.pluck($scope.querySrv.list,'query'));
     $rootScope.$broadcast('refresh');
   };
 
   $scope.render = function(query) {
     $rootScope.$broadcast('render');
+  };
+
+  $scope.toggle_pin = function(id) {
+    querySrv.list[id].pin = querySrv.list[id].pin ? false : true;
   };
 
   var update_history = function(query) {

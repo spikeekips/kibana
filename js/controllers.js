@@ -3,7 +3,7 @@
 'use strict';
 
 angular.module('kibana.controllers', [])
-.controller('DashCtrl', function($scope, $rootScope, $http, $timeout, $route, ejsResource, eventBus, 
+.controller('DashCtrl', function($scope, $rootScope, $http, $timeout, $route, ejsResource, 
   fields, dashboard) {
 
   var _d = {
@@ -13,12 +13,16 @@ angular.module('kibana.controllers', [])
     last: null
   };
 
+  // For
+  $scope.editor = {
+    index: 0
+  };
+
   $scope.init = function() {
 
     $scope.config = config;
     // Make underscore.js available to views
     $scope._ = _;
-
     $scope.dashboard = dashboard;
 
     // Provide a global list of all see fields
@@ -84,7 +88,7 @@ angular.module('kibana.controllers', [])
   $scope.init();
 
 })
-.controller('RowCtrl', function($scope, $rootScope, $timeout, ejsResource) {
+.controller('RowCtrl', function($scope, $rootScope, $timeout, ejsResource, querySrv) {
 
   var _d = {
     title: "Row",
@@ -99,6 +103,7 @@ angular.module('kibana.controllers', [])
 
 
   $scope.init = function() {
+    $scope.querySrv = querySrv;
     $scope.reset_panel();
   };
 
@@ -124,8 +129,8 @@ angular.module('kibana.controllers', [])
   };
 
   $scope.reset_panel = function() {
+
     $scope.panel = {
-      loading : false,
       error   : false,
       span    : 3,
       editable: true,
