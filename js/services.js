@@ -9,7 +9,7 @@ angular.module('kibana.services', [])
   // Save a reference to this
   var self = this;
 
-  this.list = [];
+  this.list = ['_type'];
 
   this.add_fields = function(f) {
     self.list = _.union(f,self.list);
@@ -227,6 +227,8 @@ angular.module('kibana.services', [])
       return self.ids;
     case 'pinned':
       return _.pluck(_.where(self.list,{pin:true}),'id');
+    case 'unpinned':
+      return _.difference(self.ids,_.pluck(_.where(self.list,{pin:true}),'id'));
     case 'selected':
       return _.intersection(self.ids,config.ids);
     default:
@@ -350,6 +352,8 @@ angular.module('kibana.services', [])
         .to(filter.to);
     case 'querystring':
       return ejs.QueryFilter(ejs.QueryStringQuery(filter.query)).cache(true);
+    case 'field':
+      return ejs.QueryFilter(ejs.FieldQuery(filter.field,filter.query)).cache(true);
     case 'terms':
       return ejs.TermsFilter(filter.field,filter.value);
     case 'exists':
@@ -437,7 +441,7 @@ angular.module('kibana.services', [])
     index: {
       interval: 'none',
       pattern: '_all',
-      default: '_all'
+      default: 'INDEX_MISSING'
     },
   };
 
@@ -487,7 +491,6 @@ angular.module('kibana.services', [])
         window.localStorage['dashboard'] !== ''
       ) {
         var dashboard = JSON.parse(window.localStorage['dashboard']);
-        _.defaults(dashboard,_dash);
         self.dash_load(dashboard);
       // No? Ok, grab default.json, its all we have now
       } else {
@@ -528,6 +531,9 @@ angular.module('kibana.services', [])
     // Cancel all timers
     timer.cancel_all();
 
+    // Make sure the dashboard being loaded has everything required
+    _.defaults(dashboard,_dash);
+
     // If not using time based indices, use the default index
     if(dashboard.index.interval === 'none') {
       self.indices = [dashboard.index.default];
@@ -543,6 +549,7 @@ angular.module('kibana.services', [])
     querySrv.init();
     filterSrv.init();
 
+    // If there's an index interval set and no existing time filter, send a refresh to set one
     if(dashboard.index.interval !== 'none' && filterSrv.idsByType('time').length === 0) {
       self.refresh();
     }
